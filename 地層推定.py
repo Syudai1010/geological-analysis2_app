@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-Created on Wed Nov 13 14:28:20 2024
+Created on Fri Dec  6 09:32:55 2024
 
 @author: 鈴木脩大
 """
@@ -45,16 +45,27 @@ def main():
     st.markdown("<h1 class='title'>3D 地層プロット＆ニューラルネットワーク アプリ</h1>", unsafe_allow_html=True)
     st.sidebar.markdown("<h2 class='subheader'>設定</h2>", unsafe_allow_html=True)
 
-    uploaded_file = st.sidebar.file_uploader("Excelファイルをアップロード", type=["xlsx", "xls"])
+    st.sidebar.markdown("### トレーニングデータファイルをアップロード")
+    uploaded_train_file = st.sidebar.file_uploader("トレーニング用 Excelファイルをアップロード", type=["xlsx", "xls"])
 
-    if uploaded_file is not None:
+    st.sidebar.markdown("### テストデータファイルをアップロード")
+    uploaded_test_file = st.sidebar.file_uploader("テスト用 Excelファイルをアップロード", type=["xlsx", "xls"])
+
+    if uploaded_train_file is not None and uploaded_test_file is not None:
         try:
-            excel = pd.ExcelFile(uploaded_file)
-            sheet_names = excel.sheet_names
+            # トレーニングデータ選択
+            train_excel = pd.ExcelFile(uploaded_train_file)
+            train_sheet_names = train_excel.sheet_names
+            selected_train_sheet = st.sidebar.selectbox("トレーニングデータのシートを選択", train_sheet_names)
+            train_df = pd.read_excel(uploaded_train_file, sheet_name=selected_train_sheet)
 
-            selected_sheet = st.sidebar.selectbox("シートを選択", sheet_names)
-            df = pd.read_excel(uploaded_file, sheet_name=selected_sheet)
-            columns = df.columns.tolist()
+            # テストデータ選択
+            test_excel = pd.ExcelFile(uploaded_test_file)
+            test_sheet_names = test_excel.sheet_names
+            selected_test_sheet = st.sidebar.selectbox("テストデータのシートを選択", test_sheet_names)
+            test_df = pd.read_excel(uploaded_test_file, sheet_name=selected_test_sheet)
+
+            columns = train_df.columns.tolist()
 
             st.sidebar.markdown("<h3 class='subheader'>機械学習の設定</h3>", unsafe_allow_html=True)
 
@@ -66,19 +77,7 @@ def main():
             explanatory_discrete = st.sidebar.multiselect("説明変数（離散値）を選択", columns, default=[])
             target_variable = st.sidebar.selectbox("目的変数を選択", columns)
 
-            classify_column = st.sidebar.selectbox("分類列を選択してデータを分割", columns)
-            unique_classes = df[classify_column].unique()
-
-            train_classes = st.sidebar.multiselect("訓練データに含める分類列のクラスを選択", unique_classes, default=unique_classes[:len(unique_classes)//2])
-            test_classes = st.sidebar.multiselect("テストデータに含める分類列のクラスを選択", unique_classes, default=unique_classes[len(unique_classes)//2:])
-
-            if not set(train_classes).isdisjoint(test_classes):
-                st.error("訓練データとテストデータに同じクラスを含めないようにしてください。")
-                return
-
-            train_df = df[df[classify_column].isin(train_classes)]
-            test_df = df[df[classify_column].isin(test_classes)]
-
+            # 以降の処理は、分割なしでtrain_df, test_dfを使用する
             explanatory_continuous = [col for col in explanatory_continuous if col != target_variable]
             explanatory_discrete = [col for col in explanatory_discrete if col != target_variable]
 
@@ -138,13 +137,12 @@ def main():
                 all_labels = np.union1d(label_encoder.inverse_transform(np.arange(num_classes)),
                                         test_df[target_variable].unique())
 
-                # 目的変数の3Dプロット
-                st.markdown("<h3 class='subheader'>目的変数の3D 地層プロット</h3>", unsafe_allow_html=True)
+                # 目的変数の3Dプロット（テストデータ）
+                st.markdown("<h3 class='subheader'>目的変数の3D 地層プロット（テストデータ）</h3>", unsafe_allow_html=True)
                 marker_size = st.sidebar.slider("目的変数マーカーの大きさ", 1, 20, 10)
                 fig_3d_target = px.scatter_3d(test_df, x=longitude, y=latitude, z=elevation,
                                               color=target_variable, category_orders={target_variable: all_labels},
                                               size_max=marker_size, title="3D 地層プロット（目的変数）")
-                # 文字とメモリを黒色に設定
                 fig_3d_target.update_layout(scene=dict(
                     xaxis=dict(
                         titlefont=dict(color='black'),
@@ -169,7 +167,6 @@ def main():
                 fig_3d_pred = px.scatter_3d(plot_df, x=longitude, y=latitude, z=elevation,
                                             color='予測値', category_orders={'予測値': all_labels},
                                             size_max=marker_size_pred, title="3D 地層プロット（予測値）")
-                # 文字とメモリを黒色に設定
                 fig_3d_pred.update_layout(scene=dict(
                     xaxis=dict(
                         titlefont=dict(color='black'),
@@ -198,7 +195,7 @@ def main():
         except Exception as e:
             st.error(f"エラーが発生しました: {e}")
     else:
-        st.markdown("<p class='text'>Excelファイルをアップロードしてください。</p>", unsafe_allow_html=True)
+        st.markdown("<p class='text'>トレーニング用およびテスト用のExcelファイルをアップロードしてください。</p>", unsafe_allow_html=True)
 
 # Streamlitアプリの実行
 if __name__ == "__main__":
