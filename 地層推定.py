@@ -1,176 +1,26 @@
 # -*- coding: utf-8 -*-
 """
-Created on Tue Dec 24 18:16:04 2024
+Created on Mon Dec 23 13:30:04 2024
 
 @author: 鈴木脩大
 """
 
 import streamlit as st
 import pandas as pd
-import numpy as np
 import plotly.express as px
-import plotly.graph_objects as go
-from scipy.interpolate import griddata
-from sklearn.svm import SVC
-from sklearn.preprocessing import LabelEncoder, MinMaxScaler, OneHotEncoder
+from sklearn.preprocessing import MinMaxScaler, OneHotEncoder, LabelEncoder
 from sklearn.compose import ColumnTransformer
 from sklearn.model_selection import train_test_split
-from sklearn.multiclass import OneVsRestClassifier
 import tensorflow as tf
 from tensorflow.keras.models import Sequential
 from tensorflow.keras.layers import Dense
 from tensorflow.keras.optimizers import Adam
 from tensorflow.keras.callbacks import EarlyStopping
 import matplotlib.pyplot as plt
-import random
+import numpy as np
 
-# 日本語フォント設定（Matplotlib用）
+# 日本語フォント設定
 plt.rcParams["font.family"] = "Meiryo"
-
-def plot_stratigraphic_cross_section_svm(df, lon_col, lat_col, elev_col, strat_col, svm_model, color_map):
-    """
-    SVMモデルを用いて予測された地層区分を基に、3D地層縦断図を作成します。
-    各地層区分ごとにサーフェスを描画し、ボーリング柱も色分けしてプロットします。
-    """
-    strata = df[strat_col].unique()
-
-    # 緯度と経度のスケーリング（Min-Maxスケーリング）
-    scaler = MinMaxScaler()
-    df_scaled = df.copy()
-    df_scaled[[lon_col, lat_col]] = scaler.fit_transform(df[[lon_col, lat_col]])
-
-    # 緯度と経度の分散を確認
-    lon_std = df_scaled[lon_col].std()
-    lat_std = df_scaled[lat_col].std()
-
-    if lon_std < 1e-3 or lat_std < 1e-3:
-        st.warning("緯度と経度の分散が非常に小さいため、3Dプロットが正常に作成できません。データを確認してください。")
-        return
-
-    # ジャギング（微小なノイズの追加）を適用
-    jitter_amount = 1e-5
-    df_scaled[f"{lon_col}_jittered"] = df_scaled[lon_col] + np.random.uniform(-jitter_amount, jitter_amount, size=len(df_scaled))
-    df_scaled[f"{lat_col}_jittered"] = df_scaled[lat_col] + np.random.uniform(-jitter_amount, jitter_amount, size=len(df_scaled))
-
-    # 空間グリッドの作成
-    lon_min, lon_max = df_scaled[f"{lon_col}_jittered"].min(), df_scaled[f"{lon_col}_jittered"].max()
-    lat_min, lat_max = df_scaled[f"{lat_col}_jittered"].min(), df_scaled[f"{lat_col}_jittered"].max()
-    lon_grid, lat_grid = np.meshgrid(
-        np.linspace(lon_min, lon_max, 50),
-        np.linspace(lat_min, lat_max, 50)
-    )
-
-    # 3D散布図の作成
-    fig = go.Figure()
-
-    for idx, strat in enumerate(strata):
-        # 該当地層のデータを取得
-        strat_points = df_scaled[df_scaled[strat_col] == strat]
-
-        if strat_points.empty:
-            continue
-
-        # データポイント数を確認
-        num_points = len(strat_points)
-        if num_points < 4:
-            st.warning(f"地層区分 '{strat}' に属するデータポイントが不足しています（必要:4, 実際:{num_points}）。ポイントとしてプロットします。")
-            # ポイントを散布図としてプロット
-            fig.add_trace(go.Scatter3d(
-                x=strat_points[f"{lon_col}_jittered"],
-                y=strat_points[f"{lat_col}_jittered"],
-                z=strat_points[elev_col],
-                mode='markers',
-                marker=dict(
-                    size=5,
-                    color=color_map.get(strat, 'gray'),
-                    symbol='circle'
-                ),
-                name=strat
-            ))
-            continue
-
-        # 標高データの補間
-        try:
-            elev_grid = griddata(
-                (strat_points[f"{lon_col}_jittered"], strat_points[f"{lat_col}_jittered"]),
-                strat_points[elev_col],
-                (lon_grid, lat_grid),
-                method='linear'
-            )
-        except Exception as e:
-            st.error(f"地層区分 '{strat}' に対する標高データの補間中にエラーが発生しました: {e}")
-            continue
-
-        # 補間結果が全てNaNの場合はスキップ
-        if np.all(np.isnan(elev_grid)):
-            st.warning(f"地層区分 '{strat}' に対する補間結果が全てNaNのため、プロットをスキップします。")
-            continue
-
-        # NaNを補間方法に応じて適切に処理（ここでは線形補間後のNaNを平均値で補完）
-        elev_grid = np.where(np.isnan(elev_grid), strat_points[elev_col].mean(), elev_grid)
-
-        # Surfaceの追加（透明度を1に設定）
-        fig.add_trace(go.Surface(
-            x=lon_grid,
-            y=lat_grid,
-            z=elev_grid,
-            colorscale=[[0, color_map[strat]], [1, color_map[strat]]],
-            showscale=False,
-            name=strat,
-            opacity=1  # 透明度を1に設定
-        ))
-
-    # ボーリング柱の描画（地層区分ごとに色を割り当て）
-    fig.add_trace(go.Scatter3d(
-        x=df_scaled[f"{lon_col}_jittered"],
-        y=df_scaled[f"{lat_col}_jittered"],
-        z=df_scaled[elev_col],
-        mode='markers',
-        marker=dict(
-            size=5,
-            color=df_scaled[strat_col].map(color_map),
-            symbol='circle',
-            line=dict(color='black', width=0.5)
-        ),
-        name='Borehole',
-        hovertemplate=
-            f'地層区分: %{{marker.color}}<br>'
-            f'経度: %{{x}}<br>'
-            f'緯度: %{{y}}<br>'
-            f'標高: %{{z}}'
-    ))
-
-    # 凡例のカスタマイズ（地層区分ごとの色を表示）
-    for strat in strata:
-        if len(df_scaled[df_scaled[strat_col] == strat]) < 4:
-            # ポイントとしてプロットされた場合は既に凡例に表示されている
-            continue
-        fig.add_trace(go.Scatter3d(
-            x=[None],
-            y=[None],
-            z=[None],
-            mode='markers',
-            marker=dict(
-                size=10,
-                color=color_map[strat]
-            ),
-            name=strat
-        ))
-
-    # レイアウト設定
-    fig.update_layout(
-        scene=dict(
-            xaxis_title='経度',
-            yaxis_title='緯度',
-            zaxis_title='標高'
-        ),
-        title='SVMによる3D地層縦断図',
-        width=800,
-        height=700,
-        showlegend=True
-    )
-
-    st.plotly_chart(fig, use_container_width=True)
 
 def main():
     # スタイル設定
@@ -250,15 +100,8 @@ def main():
 
             st.markdown(f"### 自動検出された地理情報列:\n- 緯度: {lat_col}\n- 経度: {lon_col}\n- 標高: {elev_col}")
 
-            # タスク1の設定（堆積年代による地層区分の予測を先に）
+            # タスク1の設定
             task1 = {
-                'name': '堆積年代による地層区分の予測',
-                'explanatory': ['N値', '深度', '色調', 'R', 'G', 'B'],  # 説明変数は選択に基づき動的に設定
-                'target': '地層区分（堆積年代）'  # 目的変数
-            }
-
-            # タスク2の設定（土質情報による地層区分の予測）
-            task2 = {
                 'name': '土質情報による地層区分の予測',
                 'explanatory': ['土質区分'],  # 説明変数
                 'target': '地層区分（土質情報）'  # 目的変数
@@ -272,29 +115,28 @@ def main():
                 task2_options
             )
 
-            # タスク1の説明変数を設定（タスク2から分離）
+            # タスク2の説明変数を設定
             if selected_task2_option == 'N値, 深度, 色調':
-                task1_explanatory = ['N値', '深度', '色調']
+                task2_explanatory = ['N値', '深度', '色調']
             elif selected_task2_option == 'N値, 深度, R, G, B':
-                task1_explanatory = ['N値', '深度', 'R', 'G', 'B']
+                task2_explanatory = ['N値', '深度', 'R', 'G', 'B']
             else:
-                task1_explanatory = []
+                task2_explanatory = []
 
-            # 更新されたタスク1の説明変数
-            task1['explanatory'] = task1_explanatory
+            # タスク2の設定
+            task2 = {
+                'name': '堆積年代による地層区分の予測',
+                'explanatory': task2_explanatory,
+                'target': '地層区分（堆積年代）'  # 目的変数
+            }
 
-            # タスクのリスト（堆積年代を先に、土質情報を後に）
+            # タスクのリスト
             tasks = [task1, task2]
 
             prediction_results = {}
-            svm_models = {}  # 各タスクごとのSVMモデルを保持する辞書
-
-            # 一時的なリストに予測された地層区分を格納
-            # これにより、すべてのタスクが完了した後に色マップを再構築可能
-            combined_predictions = []
 
             for task in tasks:
-                # タスク1の説明変数が選択されていない場合はスキップ
+                # タスク2の説明変数が選択されていない場合はスキップ
                 if task['name'] == '堆積年代による地層区分の予測' and not task['explanatory']:
                     st.warning(f"タスク '{task['name']}' に使用する説明変数が選択されていません。")
                     continue
@@ -311,7 +153,7 @@ def main():
                     continue
 
                 # 説明変数の種類を判定
-                # '土質区分'は離散値、その他は連続値と仮定
+                # ここでは、'土質区分'は離散値、その他は連続値と仮定
                 if task['name'] == '土質情報による地層区分の予測':
                     explanatory_discrete = explanatory
                     explanatory_continuous = []
@@ -343,14 +185,11 @@ def main():
                 X_test = preprocessor.transform(test_df)
                 y_test = label_encoder.transform(test_df[target])
 
-                # SVMモデルの構築（One-vs-Rest）
-                svm = OneVsRestClassifier(SVC(kernel='rbf', probability=True))
-                svm.fit(X_train, y_train)
-                svm_models[target] = svm  # 各タスクごとにSVMモデルを保持
+                input_dim = X_train.shape[1]
 
-                # Neural Networkモデル構築
+                # モデル構築
                 model = Sequential()
-                model.add(Dense(64, input_dim=X_train.shape[1], activation='relu'))
+                model.add(Dense(64, input_dim=input_dim, activation='relu'))
                 model.add(Dense(32, activation='relu'))
                 model.add(Dense(num_classes, activation='softmax'))
 
@@ -390,7 +229,7 @@ def main():
                 ax[1].legend()
                 st.pyplot(fig)
 
-                # テストデータでの予測（ニューラルネットワーク）
+                # テストデータでの予測
                 predictions = model.predict(X_test)
                 predicted_classes = np.argmax(predictions, axis=1)
 
@@ -404,9 +243,6 @@ def main():
                 test_df[f'予測_{target}'] = predicted_labels
                 prediction_results[target] = predicted_labels
 
-                # 一時的なリストに予測された地層区分を追加
-                combined_predictions.extend(predicted_labels)
-
                 # 3D プロット - 実際の地層区分
                 st.markdown(f"#### 実際の地層区分の3D 地層プロット ({target})")
                 # '地層区分'列の 'Alt' を 'G' に置換
@@ -417,11 +253,19 @@ def main():
 
                 # 共通のラベルを取得
                 actual_labels = test_df[target].unique()
-                predicted_labels_unique = np.unique(predicted_labels)
+                predicted_labels_unique = np.unique(predicted_labels)  # 修正箇所
                 all_labels = np.unique(np.concatenate((actual_labels, predicted_labels_unique)))
 
-                # マーカーサイズを小さく設定
-                marker_size_actual = st.sidebar.slider(f"{target} 実際の地層区分マーカーの大きさ", 1, 10, 5, key=f"{task['name']}_actual")
+                # 色マッピングの作成
+                # Plotlyの定義済み色から必要な数だけ選択
+                available_colors = px.colors.qualitative.Plotly
+                if len(all_labels) > len(available_colors):
+                    # 色が不足する場合は拡張
+                    available_colors = px.colors.qualitative.Alphabet + available_colors
+
+                color_discrete_map = {label: available_colors[i % len(available_colors)] for i, label in enumerate(all_labels)}
+
+                marker_size_actual = st.sidebar.slider(f"{target} 実際の地層区分マーカーの大きさ", 1, 20, 10, key=f"{task['name']}_actual")
                 fig_3d_actual = px.scatter_3d(
                     test_df,
                     x=lon_col,
@@ -429,21 +273,32 @@ def main():
                     z=elev_col,
                     color=target,
                     category_orders={target: all_labels},
-                    color_discrete_map=None,  # 後で再定義
+                    color_discrete_map=color_discrete_map,
                     size_max=marker_size_actual,
-                    title=f"3D 地層プロット（実際の地層区分: {target}）",
-                    opacity=1  # 透明度を1に設定
+                    title=f"3D 地層プロット（実際の地層区分: {target}）"
                 )
-
-                # 凡例に対応する色マッピングを適用
-                fig_3d_actual.update_traces(marker=dict(colorscale=None))
-                fig_3d_actual.update_layout(coloraxis_colorbar=dict(title=target))
-
+                fig_3d_actual.update_layout(scene=dict(
+                    xaxis=dict(
+                        title='経度',
+                        titlefont=dict(color='black'),
+                        tickfont=dict(color='black')
+                    ),
+                    yaxis=dict(
+                        title='緯度',
+                        titlefont=dict(color='black'),
+                        tickfont=dict(color='black')
+                    ),
+                    zaxis=dict(
+                        title='標高',
+                        titlefont=dict(color='black'),
+                        tickfont=dict(color='black')
+                    )
+                ))
                 st.plotly_chart(fig_3d_actual, use_container_width=True)
 
                 # 3D プロット - 予測結果
                 st.markdown(f"#### 予測結果の3D 地層プロット ({target})")
-                marker_size_pred = st.sidebar.slider(f"{target} 予測結果マーカーの大きさ", 1, 10, 5, key=f"{task['name']}_pred")
+                marker_size_pred = st.sidebar.slider(f"{target} 予測結果マーカーの大きさ", 1, 20, 10, key=f"{task['name']}_pred")
                 fig_3d_pred = px.scatter_3d(
                     test_df,
                     x=lon_col,
@@ -451,91 +306,156 @@ def main():
                     z=elev_col,
                     color=f'予測_{target}',
                     category_orders={f'予測_{target}': all_labels},
-                    color_discrete_map=None,  # 後で再定義
+                    color_discrete_map=color_discrete_map,
                     size_max=marker_size_pred,
-                    title=f"3D 地層プロット（予測: {target}）",
-                    opacity=1  # 透明度を1に設定
+                    title=f"3D 地層プロット（予測: {target}）"
                 )
-
-                # 凡例に対応する色マッピングを適用
-                fig_3d_pred.update_traces(marker=dict(colorscale=None))
-                fig_3d_pred.update_layout(coloraxis_colorbar=dict(title=f'予測_{target}'))
-
+                fig_3d_pred.update_layout(scene=dict(
+                    xaxis=dict(
+                        title='経度',
+                        titlefont=dict(color='black'),
+                        tickfont=dict(color='black')
+                    ),
+                    yaxis=dict(
+                        title='緯度',
+                        titlefont=dict(color='black'),
+                        tickfont=dict(color='black')
+                    ),
+                    zaxis=dict(
+                        title='標高',
+                        titlefont=dict(color='black'),
+                        tickfont=dict(color='black')
+                    )
+                ))
                 st.plotly_chart(fig_3d_pred, use_container_width=True)
 
             # 結果の統合はタスク処理の外で行う
-            # '予測された地層区分' を生成（堆積年代を先に、土質情報を後に）
-            st.markdown("<h3 class='subheader'>予測結果の統合</h3>", unsafe_allow_html=True)
-            def combine_predictions(row):
-                # すべての予測結果を結合（堆積年代を先に、土質情報を後に）
-                preds = []
-                for task in tasks:
-                    target = task['target']
-                    preds.append(str(row.get(f'予測_{target}', '')))
-                combined = ''.join(preds)
-                return combined if combined else '未分類'
+            if all([f'予測_{task["target"]}' in test_df.columns for task in tasks]):
+                st.markdown("<h3 class='subheader'>予測結果の統合</h3>", unsafe_allow_html=True)
+                # 新たな地層区分を作成（名称を '予測された地層区分' に変更）
+                def combine_predictions(row):
+                    depositional_age = row['予測_地層区分（堆積年代）']
+                    soil_info = row['予測_地層区分（土質情報）']
+                    if depositional_age == 'G':
+                        return 'G'
+                    else:
+                        return f"{depositional_age}{soil_info}"
 
-            test_df['予測された地層区分'] = test_df.apply(combine_predictions, axis=1)
+                test_df['予測された地層区分'] = test_df.apply(combine_predictions, axis=1)
 
-            # 新たな地層区分の正解率を計算
-            # '地層区分'が実際の正解値として存在することを前提とします
-            if '地層区分' in test_df.columns:
-                # '地層区分'列の 'Alt' を 'G' に置換（再確認）
-                test_df['地層区分'] = test_df['地層区分'].replace({'Alt': 'G'})
-                combined_accuracy = np.mean(test_df['予測された地層区分'] == test_df['地層区分'])
-                st.markdown(f"**予測された地層区分の正解率:** {combined_accuracy:.2%}")
-            else:
-                st.warning("実際の地層区分の列 '地層区分' がデータに存在しません。正解率を計算できません。")
-
-            # color_mapの再構築（予測された地層区分に基づく）
-            unique_combined_strata = test_df['予測された地層区分'].unique()
-            color_palette = px.colors.qualitative.Plotly + px.colors.qualitative.Dark24  # 十分な色数を確保
-            color_map_combined = {strat: color_palette[i % len(color_palette)] for i, strat in enumerate(unique_combined_strata)}
-
-            # タスク処理で得たcolor_map_combinedを使用して再プロット
-            # ここでは既にプロットされているため、必要に応じて修正
-
-            # 3D 地層縦断図の描画（SVMによる分類）
-            st.markdown("<h3 class='subheader'>3D 地層縦断図（SVMによる分類）</h3>", unsafe_allow_html=True)
-            # '予測された地層区分'が存在することを確認
-            if '予測された地層区分' in test_df.columns:
-                # 使用するSVMモデルを選択（堆積年代のモデルを使用）
-                if task1['target'] in svm_models:
-                    # color_map_combinedを使用
-                    plot_stratigraphic_cross_section_svm(
-                        test_df,
-                        lon_col,
-                        lat_col,
-                        elev_col,
-                        '予測された地層区分',
-                        svm_models[task1['target']],
-                        color_map_combined
-                    )
+                # 新たな地層区分の正解率を計算
+                # '地層区分'が実際の正解値として存在することを前提とします
+                if '地層区分' in test_df.columns:
+                    # '地層区分'列の 'Alt' を 'G' に置換（再確認）
+                    test_df['地層区分'] = test_df['地層区分'].replace({'Alt': 'G'})
+                    combined_accuracy = np.mean(test_df['予測された地層区分'] == test_df['地層区分'])
+                    st.markdown(f"**予測された地層区分の正解率:** {combined_accuracy:.2%}")
                 else:
-                    st.error("堆積年代による地層区分のSVMモデルが見つかりません。")
-            else:
-                st.warning("予測された地層区分の列 '予測された地層区分' がデータに存在しません。")
+                    st.warning("実際の地層区分の列 '地層区分' がデータに存在しません。正解率を計算できません。")
 
-            # 凡例の追加（color_map_combinedを使用）
-            # 既に plot_stratigraphic_cross_section_svm 内で凡例が追加されているため、ここでは不要
+                # 新たな地層区分の3Dプロットは削除
 
-            # 結果の表示とダウンロード
-            st.markdown("<h3 class='subheader'>予測結果</h3>", unsafe_allow_html=True)
-            # 必要な列のみ表示
-            display_columns = [f'予測_{task["target"]}' for task in tasks] + ['予測された地層区分']
-            st.dataframe(test_df[display_columns])
+                # 新たな地層区分の3Dプロットを '予測された地層区分' に変更
+                st.markdown("#### 予測された地層区分の3D 地層プロット")
+                marker_size_new = st.sidebar.slider("予測された地層区分マーカーの大きさ", 1, 20, 10, key="new_combined")
+                
+                # 共通のラベルを取得
+                predicted_labels_combined = test_df['予測された地層区分'].unique()
+                actual_labels_combined = test_df['地層区分'].unique()
+                all_labels_combined = np.unique(np.concatenate((predicted_labels_combined, actual_labels_combined)))
 
-            # ダウンロード用CSVの作成
-            download_df = test_df[display_columns].copy()
-            # 地層区分（土質情報）と堆積年代の順番に並べ替え（既に順序はタスクリストに基づく）
-            # ここでは列名を保持するためリネームは不要ですが、必要に応じて調整
-            csv = download_df.to_csv(index=False).encode('utf-8-sig')
-            st.download_button(
-                label="予測結果をダウンロード",
-                data=csv,
-                file_name='prediction_results_combined.csv',
-                mime='text/csv'
-            )
+                # 色マッピングの作成
+                available_colors_combined = px.colors.qualitative.Plotly
+                if len(all_labels_combined) > len(available_colors_combined):
+                    # 色が不足する場合は拡張
+                    available_colors_combined = px.colors.qualitative.Alphabet + available_colors_combined
+
+                color_discrete_map_combined = {label: available_colors_combined[i % len(available_colors_combined)] for i, label in enumerate(all_labels_combined)}
+
+                fig_3d_new_combined = px.scatter_3d(
+                    test_df,
+                    x=lon_col,
+                    y=lat_col,
+                    z=elev_col,
+                    color='予測された地層区分',
+                    category_orders={'予測された地層区分': all_labels_combined},
+                    color_discrete_map=color_discrete_map_combined,
+                    size_max=marker_size_new,
+                    title="3D 地層プロット（予測された地層区分）"
+                )
+                fig_3d_new_combined.update_layout(scene=dict(
+                    xaxis=dict(
+                        title='経度',
+                        titlefont=dict(color='black'),
+                        tickfont=dict(color='black')
+                    ),
+                    yaxis=dict(
+                        title='緯度',
+                        titlefont=dict(color='black'),
+                        tickfont=dict(color='black')
+                    ),
+                    zaxis=dict(
+                        title='標高',
+                        titlefont=dict(color='black'),
+                        tickfont=dict(color='black')
+                    )
+                ))
+                st.plotly_chart(fig_3d_new_combined, use_container_width=True)
+
+                # 実際の地層区分の3Dプロットを作成（予測との比較のため）
+                st.markdown("#### 実際の地層区分の3D 地層プロット")
+                marker_size_actual_comparison = st.sidebar.slider("実際の地層区分マーカーの大きさ", 1, 20, 10, key="actual_comparison")
+                fig_3d_actual_comparison = px.scatter_3d(
+                    test_df,
+                    x=lon_col,
+                    y=lat_col,
+                    z=elev_col,
+                    color='地層区分',
+                    category_orders={'地層区分': all_labels_combined},
+                    color_discrete_map=color_discrete_map_combined,
+                    size_max=marker_size_actual_comparison,
+                    title="3D 地層プロット（実際の地層区分）"
+                )
+                fig_3d_actual_comparison.update_layout(scene=dict(
+                    xaxis=dict(
+                        title='経度',
+                        titlefont=dict(color='black'),
+                        tickfont=dict(color='black')
+                    ),
+                    yaxis=dict(
+                        title='緯度',
+                        titlefont=dict(color='black'),
+                        tickfont=dict(color='black')
+                    ),
+                    zaxis=dict(
+                        title='標高',
+                        titlefont=dict(color='black'),
+                        tickfont=dict(color='black')
+                    )
+                ))
+                st.plotly_chart(fig_3d_actual_comparison, use_container_width=True)
+
+                # 結果の表示とダウンロード
+                st.markdown("<h3 class='subheader'>予測結果</h3>", unsafe_allow_html=True)
+                # 必要な列のみ表示
+                display_columns = [f'予測_{task["target"]}' for task in tasks] + ['予測された地層区分']
+                st.dataframe(test_df[display_columns])
+
+                # ダウンロード用CSVの作成
+                download_df = test_df[display_columns].copy()
+                # 地層区分（土質情報）と堆積年代の順番に並べ替え
+                download_df = download_df.rename(columns={
+                    '予測_地層区分（土質情報）': '予測_地層区分（土質情報）',
+                    '予測_地層区分（堆積年代）': '予測_地層区分（堆積年代）',
+                    '予測された地層区分': '予測された地層区分'
+                })
+                csv = download_df.to_csv(index=False).encode('utf-8-sig')
+                st.download_button(
+                    label="予測結果をダウンロード",
+                    data=csv,
+                    file_name='prediction_results_combined.csv',
+                    mime='text/csv'
+                )
 
         except Exception as e:
             st.error(f"エラーが発生しました: {e}")
@@ -545,8 +465,3 @@ def main():
 # Streamlitアプリの実行
 if __name__ == "__main__":
     main()
-
-
-
-
-
