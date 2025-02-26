@@ -14,9 +14,11 @@ import numpy as np
 import seaborn as sns
 from sklearn.metrics import confusion_matrix
 
-# ▼▼▼ 日本語フォント設定 (Linux上にNotoフォントをインストールしている前提) ▼▼▼
-plt.rcParams["font.family"] = "Noto Sans CJK JP"
-# ▲▲▲ 必要に応じて "Noto Serif CJK JP" 等でもOK ▲▲▲
+# ▼▼▼ 日本語フォント設定 (利用可能な "Meiryo" を使用) ▼▼▼
+plt.rcParams["font.sans-serif"] = ["Meiryo"]
+plt.rcParams["font.family"] = "sans-serif"
+plt.rcParams["axes.unicode_minus"] = False  # マイナス記号の文字化け対策
+# ▲▲▲
 
 def main():
     # スタイル設定
@@ -133,7 +135,6 @@ def main():
                     continue
 
                 # ★★ 見出しを追加（カラー指定） ★★
-                # 土質情報 ⇒ 赤文字, 堆積年代 ⇒ 青文字
                 if task['name'] == '土質情報による地層区分の予測':
                     st.markdown("<h2 style='color:red;'>土質情報</h2>", unsafe_allow_html=True)
                 else:
@@ -149,8 +150,7 @@ def main():
                     st.error(f"タスク '{task['name']}' に必要な列がデータに存在しません: {missing_cols}")
                     continue
 
-                # 土質情報タスク → 離散特徴量扱い
-                # 堆積年代タスク → 連続特徴量扱い、という想定
+                # 土質情報タスク → 離散特徴量、堆積年代タスク → 連続特徴量として扱う例
                 if task['name'] == '土質情報による地層区分の予測':
                     explanatory_discrete = explanatory
                     explanatory_continuous = []
@@ -211,7 +211,7 @@ def main():
                     )
                 st.success(f"{task['name']} のトレーニングが完了しました！")
 
-                # 学習曲線の可視化
+                # 学習曲線の可視化（Matplotlib）
                 fig, ax = plt.subplots(1, 2, figsize=(12, 5))
                 ax[0].plot(history.history['loss'], label='損失')
                 if 'val_loss' in history.history:
@@ -230,20 +230,16 @@ def main():
                 train_predicted_classes = np.argmax(train_predictions, axis=1)
                 train_accuracy = np.mean(train_predicted_classes == y_train_split)
 
-                # モデルの性能
                 st.markdown("## モデルの性能", unsafe_allow_html=True)
                 st.markdown(
-                    f"<p style='font-size:20px;'>"
-                    f"トレーニングデータに対する正解率: {train_accuracy:.2%}</p>",
+                    f"<p style='font-size:20px;'>トレーニングデータに対する正解率: {train_accuracy:.2%}</p>",
                     unsafe_allow_html=True
                 )
 
-                # 混同行列
+                # 混同行列（Matplotlib）
                 cm = confusion_matrix(y_train_split, train_predicted_classes)
                 fig_cm, ax_cm = plt.subplots(figsize=(6, 4))
                 sns.heatmap(cm, annot=True, cmap='Blues', fmt='d', cbar=False, ax=ax_cm)
-
-                # 混同行列の軸ラベルにクラス名を表示
                 ax_cm.set_xticklabels(label_encoder.classes_)
                 ax_cm.set_yticklabels(label_encoder.classes_)
                 ax_cm.set_xlabel('予測ラベル')
@@ -251,30 +247,18 @@ def main():
                 ax_cm.set_title(f'混同行列（{task["name"]} - トレーニングデータ）')
                 st.pyplot(fig_cm)
 
-                # テストデータで予測
+                # テストデータでの予測
                 predictions = model.predict(X_test)
                 predicted_classes = np.argmax(predictions, axis=1)
                 predicted_labels = label_encoder.inverse_transform(predicted_classes)
 
-                # テストデータフレームに予測結果を追加
                 test_df[f'予測_{target}'] = predicted_labels
                 prediction_results[target] = predicted_labels
 
                 # 新しい地点に対する予測結果
                 st.markdown("## 新しい地点に対する予測結果", unsafe_allow_html=True)
 
-                # Plotly 3D 散布図の色設定
-                actual_labels = test_df[target].unique()
-                predicted_labels_unique = np.unique(predicted_labels)
-                all_labels = np.unique(np.concatenate((actual_labels, predicted_labels_unique)))
-                available_colors = px.colors.qualitative.Plotly
-                if len(all_labels) > len(available_colors):
-                    available_colors = px.colors.qualitative.Alphabet + available_colors
-                color_discrete_map = {
-                    label: available_colors[i % len(available_colors)]
-                    for i, label in enumerate(all_labels)
-                }
-
+                # Plotly 3D 散布図の作成（軸タイトルや凡例に Meiryo を指定）
                 st.markdown(f"#### 予測結果の3D 地層プロット ({target})")
                 marker_size_pred = st.sidebar.slider(
                     f"{target} 予測結果マーカーの大きさ", 1, 20, 10, key=f"{task['name']}_pred"
@@ -285,30 +269,60 @@ def main():
                     y=lat_col,
                     z=elev_col,
                     color=f'予測_{target}',
-                    category_orders={f'予測_{target}': all_labels},
-                    color_discrete_map=color_discrete_map,
-                    size_max=marker_size_pred,
                     title=f"3D 地層プロット（予測: {target}）"
                 )
                 fig_3d_pred.update_layout(
+                    title={
+                        "text": f"3D 地層プロット（予測: {target}）",
+                        "font": {
+                            "family": "Meiryo",
+                            "size": 18,
+                            "color": "black"
+                        }
+                    },
                     scene=dict(
                         xaxis=dict(
-                            title=dict(text='経度', font=dict(color='black')),
-                            tickfont=dict(color='black')
+                            title=dict(
+                                text='経度',
+                                font=dict(
+                                    family='Meiryo',
+                                    size=12,
+                                    color='black'
+                                )
+                            )
                         ),
                         yaxis=dict(
-                            title=dict(text='緯度', font=dict(color='black')),
-                            tickfont=dict(color='black')
+                            title=dict(
+                                text='緯度',
+                                font=dict(
+                                    family='Meiryo',
+                                    size=12,
+                                    color='black'
+                                )
+                            )
                         ),
                         zaxis=dict(
-                            title=dict(text='標高', font=dict(color='black')),
-                            tickfont=dict(color='black')
+                            title=dict(
+                                text='標高',
+                                font=dict(
+                                    family='Meiryo',
+                                    size=12,
+                                    color='black'
+                                )
+                            )
+                        )
+                    ),
+                    legend=dict(
+                        font=dict(
+                            family='Meiryo',
+                            size=12,
+                            color='black'
                         )
                     )
                 )
                 st.plotly_chart(fig_3d_pred, use_container_width=True)
 
-            # タスク1,2 の予測結果がそろっていれば統合
+            # タスク1,2 の予測結果がそろっていれば統合結果の表示
             if all([f'予測_{task["target"]}' in test_df.columns for task in tasks]):
                 st.markdown("### [統合結果]")
                 st.markdown("<h3 class='subheader'>予測結果の統合</h3>", unsafe_allow_html=True)
@@ -316,7 +330,6 @@ def main():
                 def combine_predictions(row):
                     depositional_age = row['予測_地層区分（堆積年代）']
                     soil_info = row['予測_地層区分（土質情報）']
-                    # 例: 堆積年代が G なら G だけ、そうでなければ "堆積年代 + 土質情報"
                     if depositional_age == 'G':
                         return 'G'
                     else:
@@ -328,65 +341,70 @@ def main():
                 marker_size_new = st.sidebar.slider(
                     "予測された地層区分マーカーの大きさ", 1, 20, 10, key="new_combined"
                 )
-                predicted_labels_combined = test_df['予測された地層区分'].unique()
-                actual_labels_combined = (
-                    test_df['地層区分'].unique()
-                    if '地層区分' in test_df.columns else []
-                )
-                all_labels_combined = np.unique(
-                    np.concatenate((predicted_labels_combined, actual_labels_combined))
-                )
-                available_colors_combined = px.colors.qualitative.Plotly
-                if len(all_labels_combined) > len(available_colors_combined):
-                    available_colors_combined = px.colors.qualitative.Alphabet + available_colors_combined
-
-                color_discrete_map_combined = {
-                    label: available_colors_combined[i % len(available_colors_combined)]
-                    for i, label in enumerate(all_labels_combined)
-                }
                 fig_3d_new_combined = px.scatter_3d(
                     test_df,
                     x=lon_col,
                     y=lat_col,
                     z=elev_col,
                     color='予測された地層区分',
-                    category_orders={'予測された地層区分': all_labels_combined},
-                    color_discrete_map=color_discrete_map_combined,
-                    size_max=marker_size_new,
                     title="3D 地層プロット（予測された地層区分）"
                 )
                 fig_3d_new_combined.update_layout(
+                    title={
+                        "text": "3D 地層プロット（予測された地層区分）",
+                        "font": {
+                            "family": "Meiryo",
+                            "size": 18,
+                            "color": "black"
+                        }
+                    },
                     scene=dict(
                         xaxis=dict(
-                            title=dict(text='経度', font=dict(color='black')),
-                            tickfont=dict(color='black')
+                            title=dict(
+                                text='経度',
+                                font=dict(
+                                    family='Meiryo',
+                                    size=12,
+                                    color='black'
+                                )
+                            )
                         ),
                         yaxis=dict(
-                            title=dict(text='緯度', font=dict(color='black')),
-                            tickfont=dict(color='black')
+                            title=dict(
+                                text='緯度',
+                                font=dict(
+                                    family='Meiryo',
+                                    size=12,
+                                    color='black'
+                                )
+                            )
                         ),
                         zaxis=dict(
-                            title=dict(text='標高', font=dict(color='black')),
-                            tickfont=dict(color='black')
+                            title=dict(
+                                text='標高',
+                                font=dict(
+                                    family='Meiryo',
+                                    size=12,
+                                    color='black'
+                                )
+                            )
+                        )
+                    ),
+                    legend=dict(
+                        font=dict(
+                            family='Meiryo',
+                            size=12,
+                            color='black'
                         )
                     )
                 )
                 st.plotly_chart(fig_3d_new_combined, use_container_width=True)
 
-                # 予測結果テーブルの表示
                 st.markdown("<h3 class='subheader'>予測結果</h3>", unsafe_allow_html=True)
-                display_columns = [
-                    f'予測_{task["target"]}' for task in tasks
-                ] + ['予測された地層区分']
+                display_columns = [f'予測_{task["target"]}' for task in tasks] + ['予測された地層区分']
                 st.dataframe(test_df[display_columns])
 
-                # CSVダウンロード
                 download_df = test_df[display_columns].copy()
-                download_df = download_df.rename(columns={
-                    '予測_地層区分（土質情報）': '予測_地層区分（土質情報）',
-                    '予測_地層区分（堆積年代）': '予測_地層区分（堆積年代）',
-                    '予測された地層区分': '予測された地層区分'
-                })
                 csv = download_df.to_csv(index=False, encoding='utf-8-sig')
                 st.download_button(
                     label="予測結果をダウンロード",
