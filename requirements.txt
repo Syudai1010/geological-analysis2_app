@@ -7,3 +7,4 @@ scikit-learn
 tensorflow
 numpy
 scipy
+seaborn
