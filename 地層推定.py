@@ -14,11 +14,12 @@ import numpy as np
 import seaborn as sns
 from sklearn.metrics import confusion_matrix
 
-# ▼▼▼ 日本語フォント設定 (利用可能な "Meiryo" を使用) ▼▼▼
-plt.rcParams["font.sans-serif"] = ["Meiryo"]
+# ▼▼▼ 日本語フォント設定（IPAexGothicを使用） ▼▼▼
+plt.rcParams["font.sans-serif"] = ["IPAexGothic"]
 plt.rcParams["font.family"] = "sans-serif"
 plt.rcParams["axes.unicode_minus"] = False  # マイナス記号の文字化け対策
 # ▲▲▲
+
 
 def main():
     # スタイル設定
