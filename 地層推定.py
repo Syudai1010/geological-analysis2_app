@@ -1,27 +1,27 @@
+# app.py
 import streamlit as st
 import pandas as pd
 import plotly.express as px
-from sklearn.preprocessing import MinMaxScaler, OneHotEncoder, LabelEncoder
+from sklearn.preprocessing import MinMaxScaler, LabelEncoder
 from sklearn.compose import ColumnTransformer
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import confusion_matrix
-import tensorflow as tf
 from tensorflow.keras.models import Sequential
 from tensorflow.keras.layers import Dense
 from tensorflow.keras.optimizers import Adam
 from tensorflow.keras.callbacks import EarlyStopping
 import matplotlib.pyplot as plt
-import japanize_matplotlib          # ← Matplotlib⽤フォント対策
+import japanize_matplotlib
 import numpy as np
 import seaborn as sns
 
-# -------------------- 共通レイアウトとフォント --------------------
+# ------------- レイアウト & フォント -------------
 st.set_page_config(page_title="3D 地層プロット & NN", layout="wide")
 st.markdown(
     """
     <style>
     @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;700&display=swap');
-    html, body, [class*="css"]  { font-family: 'Noto Sans JP', sans-serif; }
+    html, body, [class*="css"] { font-family: 'Noto Sans JP', sans-serif; }
     .title      { font-size: 36px; font-weight: 700; }
     .subheader  { font-size: 24px; font-weight: 700; }
     .text       { font-size: 18px; }
@@ -30,34 +30,38 @@ st.markdown(
     unsafe_allow_html=True
 )
 
-# -------------------- アプリ本体 --------------------
+# ------------- アプリ本体 -------------
 def main():
     st.markdown("<h1 class='title'>3D 地層プロット＆ニューラルネットワーク アプリ</h1>", unsafe_allow_html=True)
     st.sidebar.markdown("<h2 class='subheader'>設定</h2>", unsafe_allow_html=True)
 
-    # ---------- ファイルアップロード ----------
+    # -------- ファイルアップロード --------
     st.sidebar.markdown("### トレーニングデータファイルをアップロード")
-    f_train = st.sidebar.file_uploader("Excel (xlsx/xls)", type=["xlsx", "xls"])
+    f_train = st.sidebar.file_uploader(
+        "トレーニング用 Excel (xlsx/xls)", type=["xlsx", "xls"], key="train_uploader"
+    )
 
     st.sidebar.markdown("### テストデータファイルをアップロード")
-    f_test  = st.sidebar.file_uploader("Excel (xlsx/xls)", type=["xlsx", "xls"])
+    f_test = st.sidebar.file_uploader(
+        "テスト用 Excel (xlsx/xls)", type=["xlsx", "xls"], key="test_uploader"
+    )
 
     if f_train is None or f_test is None:
         st.markdown("<p class='text'>トレーニング用とテスト用の Excel ファイルをアップロードしてください。</p>", unsafe_allow_html=True)
         st.stop()
 
     try:
-        # ---------- Excel 読み込み ----------
+        # -------- Excel 読み込み --------
         train_excel = pd.ExcelFile(f_train)
         test_excel  = pd.ExcelFile(f_test)
 
-        sheet_tr = st.sidebar.selectbox("トレーニングシート", train_excel.sheet_names)
-        sheet_te = st.sidebar.selectbox("テストシート",    test_excel.sheet_names)
+        sheet_tr = st.sidebar.selectbox("トレーニングシート", train_excel.sheet_names, key="train_sheet")
+        sheet_te = st.sidebar.selectbox("テストシート",    test_excel.sheet_names,  key="test_sheet")
 
         df_tr = pd.read_excel(f_train, sheet_name=sheet_tr)
         df_te = pd.read_excel(f_test,  sheet_name=sheet_te)
 
-        # ---------- 緯度・経度・標高列検出 ----------
+        # -------- 緯度・経度・標高列検出 --------
         def detect_geo(df):
             lat = next((c for c in df.columns if c == "緯度"), None)
             lon = next((c for c in df.columns if c == "経度"), None)
@@ -71,14 +75,14 @@ def main():
 
         st.info(f"検出列 ➜ 緯度: **{lat_col}**, 経度: **{lon_col}**, 標高: **{elev_col}**")
 
-        # ---------- タスク定義 ----------
+        # -------- タスク定義 --------
         task1 = dict(
             name="土質情報",
             explan=["土質区分"],
             target="地層区分（土質情報）"
         )
         st.sidebar.markdown("### 堆積年代タスクの説明変数を選択")
-        opt  = st.sidebar.radio("", ["N値, 深度, 色調", "N値, 深度, R, G, B"])
+        opt = st.sidebar.radio("", ["N値, 深度, 色調", "N値, 深度, R, G, B"], key="radio_explan")
         explan2 = ["N値", "深度", "色調"] if opt.startswith("N値, 深度, 色調") else ["N値", "深度", "R", "G", "B"]
         task2 = dict(
             name="堆積年代",
@@ -87,14 +91,14 @@ def main():
         )
         tasks = [task1, task2]
 
-        # ---------- 各タスク処理 ----------
+        # -------- 各タスク処理 --------
         for task in tasks:
             miss = [c for c in task["explan"] + [task["target"]] if c not in df_tr.columns]
             if miss:
                 st.warning(f"**{task['name']}** : 必須列がありません → {miss}")
                 continue
 
-            color = "red" if task["name"].startswith("土質") else "blue"
+            color = "red" if task["name"] == "土質情報" else "blue"
             st.markdown(f"<h2 style='color:{color};'>{task['name']}</h2>", unsafe_allow_html=True)
 
             # ----- 前処理 -----
@@ -150,7 +154,7 @@ def main():
             sns.heatmap(cm, annot=True, fmt="d", cmap="Blues",
                         xticklabels=classes, yticklabels=classes, ax=ax_cm)
             ax_cm.set_xlabel("予測"); ax_cm.set_ylabel("実測")
-            ax_cm.set_title(f"混同行列（{task['name']}）")       # ★ タイトル追加
+            ax_cm.set_title(f"混同行列（{task['name']}）")
             st.pyplot(fig_cm)
 
             # ----- テスト予測 -----
@@ -159,15 +163,14 @@ def main():
 
             # ----- 3D Plotly -----
             fig3d = px.scatter_3d(
-                df_te,
-                x=lon_col, y=lat_col, z=elev_col,
+                df_te, x=lon_col, y=lat_col, z=elev_col,
                 color=f"予測_{task['target']}",
                 title=f"3D 地層プロット（{task['target']}）"
             )
             fig3d.update_layout(font_family="Noto Sans JP, IPAexGothic, sans-serif")
             st.plotly_chart(fig3d, use_container_width=True)
 
-        # ---------- 統合結果 ----------
+        # -------- 統合結果 --------
         if all(f"予測_{t['target']}" in df_te for t in tasks):
             st.markdown("<h2 class='subheader'>予測結果の統合</h2>", unsafe_allow_html=True)
 
@@ -188,6 +191,6 @@ def main():
     except Exception as e:
         st.error(f"エラーが発生しました: {e}")
 
-# -------------------- 実行 --------------------
+# ------------- 実行 -------------
 if __name__ == "__main__":
     main()
