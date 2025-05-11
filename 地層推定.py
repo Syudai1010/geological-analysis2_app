@@ -118,7 +118,7 @@ def main():
             fig3d = px.scatter_3d(
                 df_te, x=lon_col, y=lat_col, z=elev_col,
                 color=f"予測_{task['target']}",
-                title="新しいデータの 3D 予測プロット"
+                title="新しいデータに対する 3D 予測プロット"
             )
             fig3d.update_layout(font_family="Noto Sans JP, IPAexGothic, sans-serif",
                                 legend_title_text="予測ラベル")
