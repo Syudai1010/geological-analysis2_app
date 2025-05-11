@@ -13,6 +13,20 @@ import matplotlib.pyplot as plt
 import numpy as np
 import seaborn as sns
 from sklearn.metrics import confusion_matrix
+import matplotlib.pyplot as plt
+import matplotlib.font_manager as font_manager
+import os
+
+# IPAゴシックフォントのパスを明示的に設定 (Streamlit Cloud環境のフォントパス)
+font_dirs = ['/usr/share/fonts/opentype/ipafont-gothic']
+font_files = font_manager.findSystemFonts(fontpaths=font_dirs)
+
+for font_file in font_files:
+    font_manager.fontManager.addfont(font_file)
+
+plt.rcParams['font.family'] = 'IPAexGothic'
+plt.rcParams['axes.unicode_minus'] = False
+
 
 # ▼▼▼ 日本語フォント設定（IPAexGothicを使用） ▼▼▼
 plt.rcParams["font.sans-serif"] = ["IPAexGothic"]
